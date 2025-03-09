@@ -1,0 +1,6 @@
+fastapi==0.115.11
+uvicorn==0.34.0
+python-socketio[client]==5.12.1
+weaviate-client==4.11.1
+httpx
+python-dotenv==1.0.1
