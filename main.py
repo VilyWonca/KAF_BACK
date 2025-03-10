@@ -1,12 +1,30 @@
 import logging
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from socket_manager import sio
 from socketio import ASGIApp
 
-# Инициализация FastAPI и интеграция WebSocket
+# Импортируем router из client_load_book
+from client_load_book import router as upload_router
+
+# Инициализация FastAPI
 app = FastAPI()
+
+# Разрешаем CORS для всех источников
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],        # Разрешены запросы с любых источников
+    allow_credentials=True,
+    allow_methods=["*"],        # Разрешаем все HTTP-методы
+    allow_headers=["*"],        # Разрешаем все заголовки
+)
+
+# Интеграция с Socket.IO
 socket_app = ASGIApp(sio, other_asgi_app=app)
+
+# Подключаем router для загрузки файлов с префиксом /api
+app.include_router(upload_router, prefix="/api")
 
 # Настройка логирования
 logging.basicConfig(
@@ -15,16 +33,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Логирование запуска сервера
 logger.info("🚀 Сервер FastAPI + Socket.IO запущен...")
-
 
 # Простая REST точка входа
 @app.get("/")
 def read_root():
     logger.info("📥 Запрос на корневой эндпоинт `/`")
     return {"message": "Hello from FastAPI + Socket.IO"}
-
 
 # Функция запуска сервера
 def start():
@@ -33,7 +48,6 @@ def start():
         uvicorn.run(socket_app, host="0.0.0.0", port=5041)
     except Exception as e:
         logger.error(f"❌ Ошибка запуска сервера: {e}")
-
 
 if __name__ == "__main__":
     start()
