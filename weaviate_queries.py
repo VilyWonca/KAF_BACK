@@ -102,7 +102,7 @@ def search_hybrid(query_text: str, limit: int = 5, alpha: float = 0.5):
         collection = client.collections.get(CLASS_NAME)
         response = collection.query.hybrid(
             query=query_text,
-            limit=limit,
+            limit=  limit,
             alpha=alpha
         )
         return response.objects
