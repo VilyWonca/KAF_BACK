@@ -8,22 +8,26 @@ from pypdf import PdfReader
 # Папка с PDF-файлами
 pdf_folder = "books"
 
-def extract_text_from_pdf(pdf_path: str) -> str:
-    text = ""
+def extract_text_pages(pdf_path: str) -> list:
+    """
+    Извлекает текст из PDF-файла постранично.
+    Возвращает список кортежей (page_number, page_text).
+    """
+    pages = []
     try:
         reader = PdfReader(pdf_path)
-        for page in reader.pages:
+        for i, page in enumerate(reader.pages, start=1):
             page_text = page.extract_text()
             if page_text:
-                text += page_text + "\n"
+                pages.append((i, page_text))
     except Exception as e:
         print(f"Ошибка при чтении {pdf_path}: {e}")
-    return text
+    return pages
 
 def split_text(text: str, max_length: int = 1000) -> list:
     """
     Разбивает текст на чанки длиной не более max_length символов.
-    Пытается разбить по последнему переносу строки в пределах max_length.
+    Старается разбить по последнему переносу строки в пределах max_length.
     """
     chunks = []
     while len(text) > max_length:
@@ -37,16 +41,39 @@ def split_text(text: str, max_length: int = 1000) -> list:
         chunks.append(text)
     return chunks
 
+def parse_filename_for_book_and_author(filename: str) -> tuple:
+    """
+    Ожидается, что имя файла имеет вид:
+        'Название книги ... Автор.pdf'
+    Функция возвращает кортеж (title__book, author).
+
+    Если формат не совпадает, в качестве автора возвращается пустая строка,
+    а в качестве названия — имя файла без расширения.
+    """
+    filename_no_ext = os.path.splitext(filename)[0]  # убираем расширение
+    parts = filename_no_ext.split("...")
+    if len(parts) == 2:
+        book_title = parts[0].strip()
+        book_author = parts[1].strip()
+    else:
+        book_title = filename_no_ext
+        book_author = ""
+    return book_title, book_author
+
 # Устанавливаем параметры подключения: HTTP на localhost:8080, gRPC на localhost:8086
 connection_params = ConnectionParams(
-    http={"host": "localhost",
-          "port": 8080,
-          "secure": False,
-          "timeout": 2000},
-    grpc={"host": "localhost",
-          "port": 8086,
-          "secure": False,
-          "timeout": 2000}
+    http={
+        "host": "localhost",
+        "port": 8080,
+        "secure": False,
+        "timeout": 2000
+    },
+    grpc={
+        "host": "localhost",
+        "port": 8086,
+        "secure": False,
+        "timeout": 2000
+    }
 )
 
 # Инициализируем клиента Weaviate
@@ -61,17 +88,17 @@ except WeaviateGRPCUnavailableError as e:
 except Exception as e:
     print("Ошибка подключения:", e)
 
-# Создаем коллекцию "Document" с указанными свойствами.
-# Важно: внутри Docker мы должны обращаться к трансформеру по имени "t2v-transformers", а не "localhost".
+# Создаём коллекцию "Document" с полями: text, filename, title__book, author, page_number
 try:
     client.collections.create(
         "Document",
         properties=[
             Property(name="text", data_type=DataType.TEXT),
-            Property(name="filename", data_type=DataType.TEXT)
-        ],
-        vectorizer="mediumnew-t2v-transformers-1",  # Проверьте, что это корректное имя модуля
-        vectorizer_config={"host": "t2v-transformers", "port": 8080}
+            Property(name="filename", data_type=DataType.TEXT),
+            Property(name="title__book", data_type=DataType.TEXT),
+            Property(name="author", data_type=DataType.TEXT),
+            Property(name="page_number", data_type=DataType.INT)
+        ]
     )
     print("Коллекция 'Document' успешно создана.")
 except Exception as e:
@@ -98,27 +125,37 @@ if document_collection is not None:
         if filename.lower().endswith(".pdf"):
             pdf_path = os.path.join(pdf_folder, filename)
             print(f"Обработка файла: {pdf_path}")
-            pdf_text = extract_text_from_pdf(pdf_path)
-            if pdf_text:
-                # Разбиваем текст на чанки
-                chunks = split_text(pdf_text, max_length=1000)
-                print(f"Разбито на {len(chunks)} частей")
-                for i, chunk in enumerate(chunks):
-                    data_object = {
-                        "text": chunk,
-                        "filename": f"{filename}_part_{i+1}"
-                    }
-                    try:
-                        uuid = document_collection.data.insert(data_object)
-                        print(f"Документ '{filename}_part_{i+1}' успешно добавлен в Weaviate: {uuid}")
-                    except WeaviateClosedClientError as e:
-                        print(f"Клиент закрыт при добавлении '{filename}_part_{i+1}', переподключаемся...", e)
-                        client._skip_init_checks = True
-                        client.connect()
-                        uuid = document_collection.data.insert(data_object)
-                        print(f"Документ '{filename}_part_{i+1}' успешно добавлен в Weaviate: {uuid}")
-                    except Exception as e:
-                        print(f"Ошибка при добавлении документа '{filename}_part_{i+1}':", e)
+
+            # Получаем название книги и автора из имени файла
+            book_title, book_author = parse_filename_for_book_and_author(filename)
+
+            # Извлекаем текст из PDF постранично
+            pages = extract_text_pages(pdf_path)
+            if pages:
+                for page_num, page_text in pages:
+                    # Разбиваем текст страницы на чанки
+                    chunks = split_text(page_text, max_length=1000)
+                    print(f"Страница {page_num}: разбито на {len(chunks)} частей")
+                    # Вставляем каждый чанк в Weaviate
+                    for i, chunk in enumerate(chunks):
+                        data_object = {
+                            "text": chunk,
+                            "filename": f"{filename}_page_{page_num}_part_{i+1}",
+                            "title__book": book_title,
+                            "author": book_author,
+                            "page_number": page_num
+                        }
+                        try:
+                            uuid = document_collection.data.insert(data_object)
+                            print(f"Документ '{filename}_page_{page_num}_part_{i+1}' успешно добавлен в Weaviate: {uuid}")
+                        except WeaviateClosedClientError as e:
+                            print(f"Клиент закрыт при добавлении '{filename}_page_{page_num}_part_{i+1}', переподключаемся...", e)
+                            client._skip_init_checks = True
+                            client.connect()
+                            uuid = document_collection.data.insert(data_object)
+                            print(f"Документ '{filename}_page_{page_num}_part_{i+1}' успешно добавлен в Weaviate: {uuid}")
+                        except Exception as e:
+                            print(f"Ошибка при добавлении документа '{filename}_page_{page_num}_part_{i+1}':", e)
             else:
                 print(f"Не удалось извлечь текст из файла {filename}")
 else:

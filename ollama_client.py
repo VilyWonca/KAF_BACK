@@ -23,15 +23,27 @@ async def ask_question(
                 props = doc.get("properties", {})
             else:
                 props = getattr(doc, "properties", {})
-            title = props.get("book_title")
-            page = props['page_number'] if "page_number" in props else ""
+
+            title = props.get("title__book")
+            author = props.get("author")
+            page = props.get("page_number", "")
+            # Если значение пустое или не может быть преобразовано в int, по умолчанию используем 1
+            try:
+                page_num = int(page) if page != "" else 1
+            except ValueError:
+                page_num = 1
+
             text = props.get("text", "")
-            context_parts.append(f'Название книги: "{title}" страница {(int(page) - 1)}\nОтрывок из этой страницы: {text}')
+            # Вычитаем 1 из номера страницы для формирования строки (если это требуется)
+            context_parts.append(
+                f'Автор: {author} Название книги: "{title}" страница {(page_num - 1)}\nОтрывок из этой страницы: {text}'
+            )
         context = "\n\n".join(context_parts)
         prompt = (
-            f"Сейчас я тебе предоставлю отрывки из книг так или иначе отвечающих на мой вопрос"
+            f"Сейчас я тебе предоставлю отрывки из книг так или иначе отвечающих на мой вопрос. "
             f"Вот отрывки из книг:\n{context}\n\n"
-            f"Используя только эти отрывки ответь мне мой вопрос: {user_query}. В ответе обязательно используй цитаты из подходящих фрагментов."
+            f"Используя только эти отрывки ответь мне мой вопрос: {user_query}. "
+            f"В ответе обязательно используй цитаты из подходящих фрагментов. "
             f"В конце своего ответа обязательно укажи автора книги, название книги и страницу.\n\n"
         )
     else:
@@ -48,13 +60,13 @@ async def ask_question(
     try:
         async with httpx.AsyncClient() as client:
             async with client.stream(
-                    "POST",
-                    "http://localhost:11434/api/chat",
-                    json={
-                        "model": "owl/t-lite",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "stream": True
-                    }
+                "POST",
+                "http://localhost:11434/api/chat",
+                json={
+                    "model": "owl/t-lite",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": True
+                }
             ) as resp:
                 async for chunk in resp.aiter_text():
                     # Если в чанке может быть несколько JSON-объектов, разделённых переводом строки:
@@ -66,11 +78,6 @@ async def ask_question(
                             # Извлекаем значение поля content из объекта message
                             content = data.get("message", {}).get("content", "")
                             full_response += content
-                            # event_data = {"text": full_response}
-                            # if socket_id:
-                            #     await sio.emit("partial answer", event_data, room=socket_id)
-                            # else:
-                            #     await sio.emit("partial answer", event_data)
                         except json.JSONDecodeError as e:
                             logger.error(f"Ошибка разбора JSON: {e}")
         return full_response
@@ -78,5 +85,5 @@ async def ask_question(
         logger.error(f"Ошибка при генерации ответа: {e}")
         raise
 
-
-    # curl -X POST http://localhost:11434/api/generate -H "Content-Type: application/json" -d "{\"model\":\"owl/t-lite:latest\", \"prompt\":\"Why is the sky blue?\"}"
+# Пример запроса через curl:
+# curl -X POST http://localhost:11434/api/generate -H "Content-Type: application/json" -d "{\"model\":\"owl/t-lite:latest\", \"prompt\":\"Why is the sky blue?\"}"
