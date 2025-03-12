@@ -88,8 +88,6 @@ def search_by_keyword(query_text: str, limit: int = 5) -> list:
             query=query_text,
             limit=limit
         )
-        # # Преобразуем каждый найденный объект в dict, если у него есть атрибут properties
-        # documents = [dict(obj.properties) if hasattr(obj, "properties") else obj for obj in response.objects]
         return response.objects
     except Exception as e:
         logger.error(f"❌ Ошибка при поиске по ключевым словам: {e}")
