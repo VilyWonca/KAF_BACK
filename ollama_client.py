@@ -13,6 +13,7 @@ async def ask_question(
     sio,            # Экземпляр Socket.IO (AsyncServer)
     socket_id: Optional[str] = None
 ) -> str:
+    # Формирование prompt на основе документов (если они есть)
     if documents:
         context_parts = []
         for doc in documents:
@@ -24,10 +25,9 @@ async def ask_question(
                 page_num = int(page) if page != "" else 1
             except ValueError:
                 page_num = 1
-
             text = props.get("text", "")
             context_parts.append(
-                f'Автор: {author} Название книги: "{title}" страница {(page_num - 1)}\nОтрывок из этой страницы: {text}'
+                f'Автор: {author} Название книги: "{title}" страница {page_num - 1}\nОтрывок из этой страницы: {text}'
             )
         context = "\n\n".join(context_parts)
         prompt = (
@@ -44,11 +44,11 @@ async def ask_question(
         )
 
     logger.info(f"Сформированный prompt:\n{prompt}")
-
     full_response = ""
 
     try:
-        async with httpx.AsyncClient() as client:
+        # Устанавливаем таймаут в 60 секунд на случай медленной обработки
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             async with client.stream(
                 "POST",
                 "http://localhost:11434/api/chat",
@@ -64,17 +64,25 @@ async def ask_question(
                             continue
                         try:
                             data = json.loads(line)
-                            content = data.get("message", {}).get("content", "")
-                            full_response += content
-                            # Отправляем накопленный ответ клиенту в виде объекта с ключом "text"
-                            if socket_id:
-                                await sio.emit("partial answer", {"text": full_response}, to=socket_id)
                         except json.JSONDecodeError as e:
-                            logger.error(f"Ошибка разбора JSON: {e}")
+                            logger.error(f"Ошибка разбора JSON: {e}. Строка: {line}")
+                            continue
+
+                        content = data.get("message", {}).get("content", "")
+                        full_response += content
+
+                        if socket_id:
+                            try:
+                                await sio.emit("partial answer", {"text": full_response}, to=socket_id)
+                            except Exception as sio_e:
+                                logger.error(f"Ошибка при отправке через Socket.IO: {sio_e}")
         return full_response
     except Exception as e:
         logger.error(f"Ошибка при генерации ответа: {e}")
+        # Отправляем сообщение об ошибке клиенту, если socket_id указан
+        if socket_id:
+            try:
+                await sio.emit("chat message", {"text": "⚠️ Ошибка при генерации ответа."}, to=socket_id)
+            except Exception as sio_e:
+                logger.error(f"Ошибка при отправке сообщения об ошибке через Socket.IO: {sio_e}")
         raise
-
-# Пример запроса через curl:
-# curl -X POST http://localhost:11434/api/generate -H "Content-Type: application/json" -d "{\"model\":\"owl/t-lite:latest\", \"prompt\":\"Why is the sky blue?\"}"
