@@ -27,6 +27,7 @@ async def disconnect(sid):
 async def catch_all(event, sid, data):
     logger.info(f"🔥 WebSocket-событие: {event}, sid={sid}, data={data}")
 
+
 # Обработчик сообщений
 @sio.on("chat message")
 async def chat_message(sid, data):

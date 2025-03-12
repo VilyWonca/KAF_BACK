@@ -1,4 +1,3 @@
-# ollama_client.py
 import httpx
 import logging
 from typing import List, Dict, Optional
@@ -6,23 +5,18 @@ import json
 
 logger = logging.getLogger(__name__)
 
-# Определяем Document как словарь
 Document = Dict[str, any]
 
 async def ask_question(
     user_query: str,
     documents: List[Document],
-    sio,            # Экземпляр socket.io (AsyncServer)
+    sio,            # Экземпляр Socket.IO (AsyncServer)
     socket_id: Optional[str] = None
 ) -> str:
     if documents:
         context_parts = []
         for doc in documents:
-            if isinstance(doc, dict):
-                props = doc.get("properties", {})
-            else:
-                props = getattr(doc, "properties", {})
-
+            props = doc.get("properties", {}) if isinstance(doc, dict) else getattr(doc, "properties", {})
             title = props.get("book_title")
             author = props.get("author")
             page = props.get("page_number", "")
@@ -71,10 +65,10 @@ async def ask_question(
                         try:
                             data = json.loads(line)
                             content = data.get("message", {}).get("content", "")
-                            # Отправляем каждую порцию ответа клиенту через socket.io
-                            if socket_id:
-                                await sio.emit("answer", {"content": content}, to=socket_id)
                             full_response += content
+                            # Отправляем накопленный ответ клиенту в виде объекта с ключом "text"
+                            if socket_id:
+                                await sio.emit("partial answer", {"text": full_response}, to=socket_id)
                         except json.JSONDecodeError as e:
                             logger.error(f"Ошибка разбора JSON: {e}")
         return full_response
