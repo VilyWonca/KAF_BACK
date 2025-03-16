@@ -1,4 +1,18 @@
+import logger_config
 import logging
+
+# Устанавливаем уровень логирования для указанных логгеров
+for logger_name in (
+    "socketio",
+    "socketio.server",
+    "engineio",
+    "engineio.server",
+    "uvicorn",
+    "uvicorn.error",
+    "uvicorn.access",
+):
+    logging.getLogger(logger_name).setLevel(logging.ERROR)
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,13 +40,8 @@ socket_app = ASGIApp(sio, other_asgi_app=app)
 # Подключаем router для загрузки файлов с префиксом /api
 app.include_router(upload_router, prefix="/api")
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+# Создаем логгер
 logger = logging.getLogger(__name__)
-
 logger.info("🚀 Сервер FastAPI + Socket.IO запущен...")
 
 # Простая REST точка входа
