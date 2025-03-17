@@ -67,7 +67,7 @@ def test_add_document():
     }
     add_document(test_document)
 
-def search_by_similarity(query_text: str, limit: int = 7):
+def search_by_similarity(query_text: str, limit: int = 10):
     client = get_client()
     try:
         collection = client.collections.get(CLASS_NAME)
@@ -80,7 +80,7 @@ def search_by_similarity(query_text: str, limit: int = 7):
         logger.error(f"❌ Ошибка при семантическом поиске: {e}")
         return []
 
-def search_by_keyword(query_text: str, limit: int = 7) -> list:
+def search_by_keyword(query_text: str, limit: int = 10) -> list:
     client = get_client()
     try:
         collection = client.collections.get(CLASS_NAME)
@@ -94,7 +94,7 @@ def search_by_keyword(query_text: str, limit: int = 7) -> list:
         return []
 
 
-def search_hybrid(query_text: str, limit: int = 7, alpha: float = 0.5):
+def search_hybrid(query_text: str, limit: int = 10, alpha: float = 0.5):
     client = get_client()
     try:
         collection = client.collections.get(CLASS_NAME)

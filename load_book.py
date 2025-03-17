@@ -1,10 +1,17 @@
 import os
 import uuid
+import re
 from weaviate import WeaviateClient
 from weaviate.connect import ConnectionParams
 from weaviate.exceptions import WeaviateGRPCUnavailableError, WeaviateClosedClientError
 from weaviate.classes.config import Property, DataType
 from pypdf import PdfReader
+
+# Импортируем SentenceTransformer и util для семантического разбиения
+from sentence_transformers import SentenceTransformer, util
+
+# Загружаем модель один раз (можно настроить под ваши требования)
+MODEL = SentenceTransformer('all-MiniLM-L6-v2')
 
 pdf_folder = "uploads"
 
@@ -29,23 +36,15 @@ def parse_filename_for_title_author(pdf_filename: str):
     Если '...' не найден, автор будет 'Unknown'.
     Также убираем лишние точки у автора (rstrip('.')).
     """
-    # 1. Удаляем префикс UUID
     cleaned_name = remove_uuid_prefix(pdf_filename)
-
-    # 2. Отделяем расширение .pdf
     base, ext = os.path.splitext(cleaned_name)
-
-    # 3. Разбиваем по ' ... '
     parts = base.split(' ... ')
     if len(parts) == 2:
         book_title, author = parts
     else:
         book_title, author = base, "Unknown"
-
-    # Удаляем лишние точки и пробелы в конце автора
     author = author.rstrip('.').strip()
     book_title = book_title.strip()
-
     return book_title, author
 
 def extract_pages_and_metadata(pdf_path: str):
@@ -53,23 +52,16 @@ def extract_pages_and_metadata(pdf_path: str):
     metadata = {}
     try:
         reader = PdfReader(pdf_path)
-        # Извлекаем метаданные (если есть)
         meta = reader.metadata
-
-        # Предустановим "Unknown", чтобы не было KeyError
         metadata["book_title"] = "Unknown"
         metadata["author"] = "Unknown"
         metadata["edition_code"] = "Unknown"
-
-        # Если в метаданных есть информация, можно её использовать:
         if meta.title:
             metadata["book_title"] = meta.title
         if meta.author:
             metadata["author"] = meta.author
         if "/Producer" in meta:
             metadata["edition_code"] = meta["/Producer"]
-
-        # Читаем страницы
         for i, page in enumerate(reader.pages):
             page_text = page.extract_text()
             if page_text:
@@ -78,10 +70,26 @@ def extract_pages_and_metadata(pdf_path: str):
         print(f"Ошибка при чтении {pdf_path}: {e}")
     return pages, metadata
 
+def clean_text(text: str) -> str:
+    """
+    Убираем переносы с дефисом и заменяем все переводы строки на пробелы.
+    """
+    # Соединяем слова, разделённые переносом с дефисом:
+    text = text.replace("-\n", "")
+    text = text.replace("-\r\n", "")
+    # Заменяем оставшиеся переводы строки на пробелы
+    text = text.replace("\r\n", " ").replace("\n", " ")
+    # Убираем лишние пробелы
+    text = " ".join(text.split())
+    return text
+
 def split_text(text: str, max_length: int = 1000) -> list:
+    """
+    Простое разбиение текста на чанки по максимальной длине с сохранением границ по пробелу.
+    """
     chunks = []
     while len(text) > max_length:
-        split_index = text.rfind("\n", 0, max_length)
+        split_index = text.rfind(" ", 0, max_length)
         if split_index == -1:
             split_index = max_length
         chunk = text[:split_index].strip()
@@ -89,6 +97,30 @@ def split_text(text: str, max_length: int = 1000) -> list:
         text = text[split_index:].strip()
     if text:
         chunks.append(text)
+    return chunks
+
+def split_text_semantic(text: str, threshold: float = 0.75) -> list:
+    """
+    Семантическое разбиение текста на чанки:
+      1. Делит текст на предложения.
+      2. Вычисляет эмбеддинги для предложений.
+      3. Группирует предложения в чанки, если косинусное сходство между соседними предложениями выше порога.
+    """
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if not sentences:
+        return [text]
+    embeddings = MODEL.encode(sentences)
+    chunks = []
+    current_chunk = [sentences[0]]
+    for i in range(1, len(sentences)):
+        sim = util.cos_sim(embeddings[i-1], embeddings[i])
+        if sim < threshold:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = [sentences[i]]
+        else:
+            current_chunk.append(sentences[i])
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
     return chunks
 
 # Настройка подключения Weaviate
@@ -125,7 +157,7 @@ try:
             Property(name="edition_code", data_type=DataType.TEXT),
             Property(name="author", data_type=DataType.TEXT)
         ],
-        vectorizer="mediumnew-t2v-transformers-1",  # убедитесь, что это корректное имя модуля
+        vectorizer="mediumnew-t2v-transformers-1",
         vectorizer_config={"host": "t2v-transformers", "port": 8080}
     )
     print("Коллекция 'Document' успешно создана.")
@@ -144,29 +176,29 @@ try:
 except Exception as e:
     print("Ошибка получения схемы:", e)
 
+# Флаг для выбора семантического разбиения (True - использовать семантическое, False - простое разбиение)
+use_semantic = True
+
 # Если коллекция получена, обрабатываем PDF-файлы и вставляем объекты с метаданными
 if document_collection is not None:
     for filename in os.listdir(pdf_folder):
         if filename.lower().endswith(".pdf"):
             pdf_path = os.path.join(pdf_folder, filename)
-
-            # 1. Считываем страницы и базовые PDF-метаданные
             pages, meta = extract_pages_and_metadata(pdf_path)
-
-            # 2. Считываем (и переопределяем) название и автора из имени файла
-            #    (по разделителю ' ... ')
             book_title_from_name, author_from_name = parse_filename_for_title_author(filename)
-
-            # 3. Переопределяем то, что взяли из PDF-метаданных,
-            #    если нужно строго использовать информацию из названия файла
             meta["book_title"] = book_title_from_name
             meta["author"] = author_from_name
 
             print(f"Обработка файла: {pdf_path}")
             for page in pages:
                 page_number = page["page_number"]
-                # Разбиваем текст страницы на чанки
-                chunks = split_text(page["text"], max_length=1000)
+                # Применяем очистку текста от переносов и лишних символов
+                cleaned_text = clean_text(page["text"])
+                # Разбиваем текст страницы на чанки: семантическое или простое разбиение
+                if use_semantic:
+                    chunks = split_text_semantic(cleaned_text, threshold=0.35)
+                else:
+                    chunks = split_text(cleaned_text, max_length=1000)
                 print(f"Страница {page_number}: разбито на {len(chunks)} частей")
                 for i, chunk in enumerate(chunks):
                     data_object = {
