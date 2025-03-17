@@ -44,7 +44,7 @@ async def chat_message(sid, data):
         # Отправляем промежуточное сообщение клиенту
         print("🚀 Отправляем 'loading answer'...")
         await sio.emit("loading answer", {"text": "Ищу похожую информацию..."}, room=sid)
-        await asyncio.sleep(0.5)
+        # await asyncio.sleep(.1)
 
         # 📌 Выполняем поиск
         results = []
@@ -74,7 +74,7 @@ async def chat_message(sid, data):
 
         print("🚀 Отправляем 'loading answer'...")
         await sio.emit("loading answer", {"text": "Генерирую ответ..."}, room=sid)
-        await asyncio.sleep(1)
+        # await asyncio.sleep(.2)
 
         # 📌 Генерация ответа через Ollama
         try:
