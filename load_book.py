@@ -1,25 +1,31 @@
 import os
 import uuid
 import re
+import sys
+import time
 from weaviate import WeaviateClient
 from weaviate.connect import ConnectionParams
 from weaviate.exceptions import WeaviateGRPCUnavailableError, WeaviateClosedClientError
 from weaviate.classes.config import Property, DataType
 from pypdf import PdfReader
-
-# Импортируем SentenceTransformer и util для семантического разбиения
 from sentence_transformers import SentenceTransformer, util
 
-# Загружаем модель один раз (можно настроить под ваши требования)
+# Загрузка модели
+print("[LOG] Загрузка модели SentenceTransformer 'all-MiniLM-L6-v2'...")
+start_time = time.time()
 MODEL = SentenceTransformer('all-MiniLM-L6-v2')
+print(f"[LOG] Модель загружена за {time.time() - start_time:.2f} секунд.")
 
 pdf_folder = "uploads"
 
+# Проверка наличия папки uploads
+if not os.path.exists(pdf_folder):
+    print(f"[ERROR] Папка '{pdf_folder}' не существует. Создайте её и добавьте PDF файлы.")
+else:
+    print(f"[LOG] Папка '{pdf_folder}' найдена, файлов: {len(os.listdir(pdf_folder))}")
+
+# Определение функций
 def remove_uuid_prefix(filename: str) -> str:
-    """
-    Если имя файла начинается с UUID (36 символов) и дефиса,
-    то удаляем этот префикс и возвращаем оставшуюся часть.
-    """
     if len(filename) > 37 and filename[36] == '-':
         possible_uuid = filename[:36]
         try:
@@ -30,12 +36,6 @@ def remove_uuid_prefix(filename: str) -> str:
     return filename
 
 def parse_filename_for_title_author(pdf_filename: str):
-    """
-    Удаляем префикс UUID (если есть) и расширение .pdf,
-    затем разбиваем строку по ' ... ' на название книги и автора.
-    Если '...' не найден, автор будет 'Unknown'.
-    Также убираем лишние точки у автора (rstrip('.')).
-    """
     cleaned_name = remove_uuid_prefix(pdf_filename)
     base, ext = os.path.splitext(cleaned_name)
     parts = base.split(' ... ')
@@ -51,6 +51,7 @@ def extract_pages_and_metadata(pdf_path: str):
     pages = []
     metadata = {}
     try:
+        print(f"[LOG] Открытие PDF: {pdf_path}")
         reader = PdfReader(pdf_path)
         meta = reader.metadata
         metadata["book_title"] = "Unknown"
@@ -66,27 +67,19 @@ def extract_pages_and_metadata(pdf_path: str):
             page_text = page.extract_text()
             if page_text:
                 pages.append({"page_number": i + 1, "text": page_text})
+        print(f"[LOG] PDF успешно обработан: {pdf_path} (страниц: {len(pages)})")
     except Exception as e:
-        print(f"Ошибка при чтении {pdf_path}: {e}")
+        print(f"[ERROR] Ошибка при чтении {pdf_path}: {e}")
     return pages, metadata
 
 def clean_text(text: str) -> str:
-    """
-    Убираем переносы с дефисом и заменяем все переводы строки на пробелы.
-    """
-    # Соединяем слова, разделённые переносом с дефисом:
     text = text.replace("-\n", "")
     text = text.replace("-\r\n", "")
-    # Заменяем оставшиеся переводы строки на пробелы
     text = text.replace("\r\n", " ").replace("\n", " ")
-    # Убираем лишние пробелы
     text = " ".join(text.split())
     return text
 
 def split_text(text: str, max_length: int = 1000) -> list:
-    """
-    Простое разбиение текста на чанки по максимальной длине с сохранением границ по пробелу.
-    """
     chunks = []
     while len(text) > max_length:
         split_index = text.rfind(" ", 0, max_length)
@@ -100,12 +93,6 @@ def split_text(text: str, max_length: int = 1000) -> list:
     return chunks
 
 def split_text_semantic(text: str, threshold: float = 0.75) -> list:
-    """
-    Семантическое разбиение текста на чанки:
-      1. Делит текст на предложения.
-      2. Вычисляет эмбеддинги для предложений.
-      3. Группирует предложения в чанки, если косинусное сходство между соседними предложениями выше порога.
-    """
     sentences = re.split(r'(?<=[.!?])\s+', text)
     if not sentences:
         return [text]
@@ -123,104 +110,115 @@ def split_text_semantic(text: str, threshold: float = 0.75) -> list:
         chunks.append(" ".join(current_chunk))
     return chunks
 
-# Настройка подключения Weaviate
-connection_params = ConnectionParams(
-    http={"host": "localhost",
-          "port": 8080,
-          "secure": False,
-          "timeout": 2000},
-    grpc={"host": "localhost",
-          "port": 8086,
-          "secure": False,
-          "timeout": 2000}
-)
-
-client = WeaviateClient(connection_params=connection_params)
-client._skip_init_checks = True
-
-try:
-    client.connect()
-except WeaviateGRPCUnavailableError as e:
-    print("Предупреждение: gRPC health check не пройден, продолжаем работу.", e)
-except Exception as e:
-    print("Ошибка подключения:", e)
-
-# Создаем коллекцию "Document" с дополнительными свойствами
-try:
-    client.collections.create(
-        "Document",
-        properties=[
-            Property(name="text", data_type=DataType.TEXT),
-            Property(name="filename", data_type=DataType.TEXT),
-            Property(name="book_title", data_type=DataType.TEXT),
-            Property(name="page_number", data_type=DataType.INT),
-            Property(name="edition_code", data_type=DataType.TEXT),
-            Property(name="author", data_type=DataType.TEXT)
-        ],
-        vectorizer="mediumnew-t2v-transformers-1",
-        vectorizer_config={"host": "t2v-transformers", "port": 8080}
+def main():
+    # Настройка подключения к Weaviate
+    print("[LOG] Настройка подключения к Weaviate...")
+    connection_params = ConnectionParams(
+        http={"host": "localhost",
+              "port": 8080,
+              "secure": False,
+              "timeout": 2000},
+        grpc={"host": "localhost",
+              "port": 8086,
+              "secure": False,
+              "timeout": 2000}
     )
-    print("Коллекция 'Document' успешно создана.")
-except Exception as e:
-    print("Ошибка создания коллекции (возможно, она уже существует):", e)
 
-# Получаем коллекцию "Document" через схему
-document_collection = None
-try:
-    schema_info = client.collections.get("Document")
-    if hasattr(schema_info.config, "_name") and schema_info.config._name == "Document":
-        document_collection = schema_info
-        print("Коллекция 'Document' получена. Имя:", schema_info.config._name)
+    client = WeaviateClient(connection_params=connection_params)
+    client._skip_init_checks = True
+
+    try:
+        print("[LOG] Подключение к Weaviate...")
+        client.connect()
+        print("[LOG] Подключение успешно.")
+    except WeaviateGRPCUnavailableError as e:
+        print("[WARNING] gRPC health check не пройден, продолжаем работу.", e)
+    except Exception as e:
+        print("[ERROR] Ошибка подключения:", e)
+
+    # Создание коллекции
+    try:
+        print("[LOG] Создание коллекции 'Document'...")
+        client.collections.create(
+            "Document",
+            properties=[
+                Property(name="text", data_type=DataType.TEXT),
+                Property(name="filename", data_type=DataType.TEXT),
+                Property(name="book_title", data_type=DataType.TEXT),
+                Property(name="page_number", data_type=DataType.INT),
+                Property(name="edition_code", data_type=DataType.TEXT),
+                Property(name="author", data_type=DataType.TEXT)
+            ],
+            vectorizer="mediumnew-t2v-transformers-1",
+            vectorizer_config={"host": "t2v-transformers", "port": 8080}
+        )
+        print("[LOG] Коллекция 'Document' успешно создана.")
+    except Exception as e:
+        print("[WARNING] Ошибка создания коллекции (возможно, она уже существует):", e)
+
+    # Получение коллекции
+    document_collection = None
+    try:
+        print("[LOG] Получение коллекции 'Document'...")
+        schema_info = client.collections.get("Document")
+        if hasattr(schema_info.config, "_name") and schema_info.config._name == "Document":
+            document_collection = schema_info
+            print("[LOG] Коллекция 'Document' получена. Имя:", schema_info.config._name)
+        else:
+            print("[ERROR] Имя коллекции не соответствует ожидаемому. Ожидалось 'Document'.")
+    except Exception as e:
+        print("[ERROR] Ошибка получения схемы:", e)
+
+    # Флаг для выбора семантического разбиения
+    use_semantic = True
+
+    # Обработка PDF файлов, если коллекция получена
+    if document_collection is not None:
+        print("[LOG] Начало обработки PDF файлов из папки:", pdf_folder)
+        for filename in os.listdir(pdf_folder):
+            if filename.lower().endswith(".pdf"):
+                pdf_path = os.path.join(pdf_folder, filename)
+                print(f"[LOG] Обработка файла: {pdf_path}")
+                pages, meta = extract_pages_and_metadata(pdf_path)
+                book_title_from_name, author_from_name = parse_filename_for_title_author(filename)
+                meta["book_title"] = book_title_from_name
+                meta["author"] = author_from_name
+
+                for page in pages:
+                    page_number = page["page_number"]
+                    cleaned_text = clean_text(page["text"])
+                    if use_semantic:
+                        print(f"[LOG] Семантическое разбиение страницы {page_number}...")
+                        chunks = split_text_semantic(cleaned_text, threshold=0.35)
+                    else:
+                        print(f"[LOG] Простое разбиение страницы {page_number}...")
+                        chunks = split_text(cleaned_text, max_length=1000)
+                    print(f"[LOG] Страница {page_number}: разбито на {len(chunks)} частей")
+                    for i, chunk in enumerate(chunks):
+                        data_object = {
+                            "text": chunk,
+                            "filename": f"{filename}_page_{page_number}_part_{i + 1}",
+                            "book_title": meta.get("book_title", "Unknown"),
+                            "page_number": page_number,
+                            "edition_code": meta.get("edition_code", "Unknown"),
+                            "author": meta.get("author", "Unknown")
+                        }
+                        try:
+                            uuid_val = document_collection.data.insert(data_object)
+                        except WeaviateClosedClientError as e:
+                            print(f"[WARNING] Клиент закрыт при добавлении '{data_object['filename']}', переподключаемся...", e)
+                            client._skip_init_checks = True
+                            client.connect()
+                            uuid_val = document_collection.data.insert(data_object)
+                            print(f"[LOG] Документ '{data_object['filename']}' успешно добавлен: {uuid_val}")
+                        except Exception as e:
+                            print(f"[ERROR] Ошибка при добавлении документа '{data_object['filename']}':", e)
     else:
-        print("Имя коллекции не соответствует ожидаемому. Ожидалось 'Document'.")
-except Exception as e:
-    print("Ошибка получения схемы:", e)
+        print("[ERROR] Коллекция 'Document' недоступна, объекты не добавлены.")
 
-# Флаг для выбора семантического разбиения (True - использовать семантическое, False - простое разбиение)
-use_semantic = True
+    print("[LOG] Закрытие подключения к Weaviate...")
+    client.close()
+    print("=== Завершение работы скрипта load_book.py ===")
 
-# Если коллекция получена, обрабатываем PDF-файлы и вставляем объекты с метаданными
-if document_collection is not None:
-    for filename in os.listdir(pdf_folder):
-        if filename.lower().endswith(".pdf"):
-            pdf_path = os.path.join(pdf_folder, filename)
-            pages, meta = extract_pages_and_metadata(pdf_path)
-            book_title_from_name, author_from_name = parse_filename_for_title_author(filename)
-            meta["book_title"] = book_title_from_name
-            meta["author"] = author_from_name
-
-            print(f"Обработка файла: {pdf_path}")
-            for page in pages:
-                page_number = page["page_number"]
-                # Применяем очистку текста от переносов и лишних символов
-                cleaned_text = clean_text(page["text"])
-                # Разбиваем текст страницы на чанки: семантическое или простое разбиение
-                if use_semantic:
-                    chunks = split_text_semantic(cleaned_text, threshold=0.35)
-                else:
-                    chunks = split_text(cleaned_text, max_length=1000)
-                print(f"Страница {page_number}: разбито на {len(chunks)} частей")
-                for i, chunk in enumerate(chunks):
-                    data_object = {
-                        "text": chunk,
-                        "filename": f"{filename}_page_{page_number}_part_{i + 1}",
-                        "book_title": meta.get("book_title", "Unknown"),
-                        "page_number": page_number,
-                        "edition_code": meta.get("edition_code", "Unknown"),
-                        "author": meta.get("author", "Unknown")
-                    }
-                    try:
-                        uuid_val = document_collection.data.insert(data_object)
-                        print(f"Документ '{data_object['filename']}' успешно добавлен: {uuid_val}")
-                    except WeaviateClosedClientError as e:
-                        print(f"Клиент закрыт при добавлении '{data_object['filename']}', переподключаемся...", e)
-                        client._skip_init_checks = True
-                        client.connect()
-                        uuid_val = document_collection.data.insert(data_object)
-                        print(f"Документ '{data_object['filename']}' успешно добавлен: {uuid_val}")
-                    except Exception as e:
-                        print(f"Ошибка при добавлении документа '{data_object['filename']}':", e)
-else:
-    print("Коллекция 'Document' недоступна, объекты не добавлены.")
-
-client.close()
+if __name__ == '__main__':
+    main()

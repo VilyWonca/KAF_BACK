@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import subprocess
 from fastapi import APIRouter, File, UploadFile
@@ -9,7 +10,6 @@ router = APIRouter()
 
 UPLOAD_DIR = "uploads"
 BOOKS_DIR = "books"
-
 
 @router.post("/uploads")
 async def upload_files(files: List[UploadFile] = File(...)):
@@ -25,7 +25,9 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 buffer.write(await file.read())
 
         # 2. Запускаем скрипт load_book.py, который векторизует все файлы из uploads
-        subprocess.run(["python", "load_book.py"])
+        #    Используем sys.executable, чтобы гарантированно вызвать Python из текущего окружения
+        script_path = os.path.join(os.path.dirname(__file__), "load_book.py")
+        subprocess.run([sys.executable, script_path], check=True)
 
         # 3. Переносим все файлы из uploads в books, оставляя uploads пустой
         for filename in os.listdir(UPLOAD_DIR):

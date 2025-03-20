@@ -1,4 +1,3 @@
-# weaviate_client.py
 import weaviate
 import logging
 
