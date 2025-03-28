@@ -1,5 +1,6 @@
 import logging
 import weaviate
+from weaviate.classes.query import MetadataQuery
 
 # Настройки логирования
 logging.basicConfig(level=logging.INFO)
@@ -67,42 +68,51 @@ def test_add_document():
     }
     add_document(test_document)
 
-def search_by_similarity(query_text: str, limit: int = 10):
+def search_by_similarity(query_text: str):
     client = get_client()
     try:
         collection = client.collections.get(CLASS_NAME)
         response = collection.query.near_text(
             query=query_text,
-            limit=limit
+            return_metadata=MetadataQuery(distance=True),
+            distance=0.3
         )
+        for o in response.objects:
+            print(o.metadata.distance)
         return response.objects
     except Exception as e:
         logger.error(f"❌ Ошибка при семантическом поиске: {e}")
         return []
 
-def search_by_keyword(query_text: str, limit: int = 10) -> list:
+def search_by_keyword(query_text: str, limit: int = 6) -> list:
     client = get_client()
     try:
         collection = client.collections.get(CLASS_NAME)
         response = collection.query.bm25(
             query=query_text,
-            limit=limit
+            limit=limit,
+            return_metadata=MetadataQuery(score=True),
         )
+        for o in response.objects:
+            print(o.metadata.score)
         return response.objects
     except Exception as e:
         logger.error(f"❌ Ошибка при поиске по ключевым словам: {e}")
         return []
 
 
-def search_hybrid(query_text: str, limit: int = 10, alpha: float = 0.5):
+def search_hybrid(query_text: str, alpha: float = 0.9):
     client = get_client()
     try:
         collection = client.collections.get(CLASS_NAME)
         response = collection.query.hybrid(
             query=query_text,
-            limit=  limit,
-            alpha=alpha
+            alpha=alpha,
+            limit = 10,
+            return_metadata=MetadataQuery(score=True, explain_score=True)
         )
+        for o in response.objects:
+            print(o.metadata.score, o.metadata.explain_score)
         return response.objects
     except Exception as e:
         logger.error(f"❌ Ошибка при гибридном поиске: {e}")

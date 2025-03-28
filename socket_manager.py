@@ -76,7 +76,7 @@ async def chat_message(sid, data):
         await sio.emit("loading answer", {"text": "Генерирую ответ..."}, room=sid)
         # await asyncio.sleep(.2)
 
-        # 📌 Генерация ответа через Ollama
+        # Генерация ответа через Ollama
         try:
             print("🧠 Передаём данные в Ollama...")
             llm_answer = await ask_question(text, results, sio, sid)
@@ -85,7 +85,7 @@ async def chat_message(sid, data):
             print(f"❌ Ошибка в Ollama: {e}")
             llm_answer = "⚠️ Ошибка при генерации ответа."
 
-        # 📌 Отправляем ответ клиенту
+        # Отправляем ответ клиенту
         print(f"📤 Отправка ответа в чат: {llm_answer[:100]}...")
         await sio.emit("chat message", llm_answer, room=sid)
 
