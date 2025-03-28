@@ -50,7 +50,10 @@ async def ask_question(
 
     try:
         # Устанавливаем таймаут в 60 секунд на случай медленной обработки
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0),
+            transport=httpx.AsyncHTTPTransport(proxy=None)
+        ) as client:
             async with client.stream(
                 "POST",
                 "http://localhost:11434/api/chat",
