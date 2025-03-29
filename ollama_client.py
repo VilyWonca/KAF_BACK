@@ -58,7 +58,7 @@ async def ask_question(
                 "POST",
                 "http://localhost:11434/api/chat",
                 json={
-                    "model": "mistral-nemo:latest",
+                    "model": "owl/t-lite:latest",
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": True
                 }
