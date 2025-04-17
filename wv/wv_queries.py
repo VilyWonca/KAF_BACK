@@ -1,6 +1,7 @@
 import logging
 import weaviate
 from weaviate.classes.query import MetadataQuery
+from weaviate.classes.config import Configure
 
 # Настройки логирования
 logging.basicConfig(level=logging.INFO)
@@ -27,16 +28,21 @@ def create_collection():
             name=CLASS_NAME,
             description="Collection for storing book excerpts with semantic search",
             properties=[
-                {"name": "title", "dataType": "text"},
                 {"name": "author", "dataType": "text"},
-                {"name": "text", "dataType": "text"},
+                {"name": "title", "dataType": "text"},
                 {"name": "page", "dataType": "int"},
                 {"name": "published_year", "dataType": "int"},
+                {"name": "text", "dataType": "text"},
                 {"name": "language", "dataType": "text"},
             ],
-            vector_index_config={
-                "vectorizer": "text2vec-transformers"  # Исправленный способ
-            }
+            vectorizer_config=[
+                Configure.NamedVectors.text2vec_ollama(
+                    name="text_vector",
+                    source_properties=["text"],
+                    api_endpoint="http://host.docker.internal:11434",  # If using Docker, use this to contact your local Ollama instance
+                    model="nomic-embed-text:latest",  # The model to use, e.g. "nomic-embed-text"
+                )
+            ]
         )
         logger.info(f"✅ Коллекция {CLASS_NAME} успешно создана.")
     except Exception as e:
@@ -56,18 +62,6 @@ def add_document(document: dict):
     finally:
         client.close()  # Закрываем соединение
 
-# Тестовая функция для добавления документа
-def test_add_document():
-    test_document = {
-        "title": "Sample Book Title",
-        "author": "Author Name",
-        "text": "Это пример отрывка из книги, который будет векторизован с помощью text2vec-transformers.",
-        "page": 10,
-        "published_year": 2025,
-        "language": "en"
-    }
-    add_document(test_document)
-
 def search_by_similarity(query_text: str):
     client = get_client()
     try:
@@ -75,7 +69,7 @@ def search_by_similarity(query_text: str):
         response = collection.query.near_text(
             query=query_text,
             return_metadata=MetadataQuery(distance=True),
-            distance=0.3
+            distance=0.6
         )
         for o in response.objects:
             print(o.metadata.distance)
@@ -119,8 +113,5 @@ def search_hybrid(query_text: str, alpha: float = 0.9):
         return []
 
 
-
-# Точка входа в программу
 if __name__ == "__main__":
     create_collection()       # Создаём коллекцию (если нет)
-    test_add_document()       # Добавляем тестовый документ

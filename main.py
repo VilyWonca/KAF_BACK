@@ -1,4 +1,4 @@
-import logger_config
+import logger.logger_config as logger_config
 import logging
 
 # Устанавливаем уровень логирования для указанных логгеров
@@ -20,7 +20,7 @@ from socket_manager import sio
 from socketio import ASGIApp
 
 # Импортируем router из client_load_book
-from client_load_book import router as upload_router
+from load_book.client_load_book import router as upload_router
 
 # Инициализация FastAPI
 app = FastAPI()

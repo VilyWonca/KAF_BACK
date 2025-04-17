@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from socketio import AsyncServer
-from wv_queries import search_by_similarity, search_by_keyword, search_hybrid
+from wv.wv_queries import search_by_similarity, search_by_keyword, search_hybrid
 from ollama_client import ask_question
 
 # Настройка логирования

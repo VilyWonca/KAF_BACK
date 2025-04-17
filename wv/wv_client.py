@@ -8,9 +8,7 @@ _client = None
 def connect_to_weaviate():
     global _client
     if _client is None:
-        _client = weaviate.Client(
-            url="http://localhost:8090"
-        )
+        _client = weaviate.connect_to_local()
 
         logger.info("✅ Weaviate client connected successfully")
 

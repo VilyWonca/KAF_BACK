@@ -1,32 +1,6 @@
-from weaviate import WeaviateClient
-from weaviate.connect import ConnectionParams
+import weaviate
 
-# Настройка подключения к Weaviate
-connection_params = ConnectionParams(
-    http={
-        "host": "localhost",
-        "port": 8080,
-        "secure": False,
-        "timeout": 2000  # таймаут в секундах
-    },
-    grpc={
-        "host": "localhost",
-        "port": 8086,
-        "secure": False,
-        "timeout": 2000
-    }
-)
-
-client = WeaviateClient(connection_params=connection_params)
-client._skip_init_checks = True  # Используйте с осторожностью
-
-# Подключаем клиента
-try:
-    client.connect()
-    print("Соединение установлено.")
-except Exception as e:
-    print("Ошибка подключения:", e)
-    exit(1)
+client = weaviate.connect_to_local()
 
 # Удаляем коллекцию "Document"
 try:

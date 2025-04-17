@@ -6,7 +6,7 @@ import time
 from weaviate import WeaviateClient
 from weaviate.connect import ConnectionParams
 from weaviate.exceptions import WeaviateGRPCUnavailableError, WeaviateClosedClientError
-from weaviate.classes.config import Property, DataType
+from weaviate.classes.config import Property, DataType, Configure
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer, util
 
@@ -119,7 +119,7 @@ def main():
               "secure": False,
               "timeout": 2000},
         grpc={"host": "localhost",
-              "port": 8086,
+              "port": 50051,
               "secure": False,
               "timeout": 2000}
     )
@@ -149,8 +149,14 @@ def main():
                 Property(name="edition_code", data_type=DataType.TEXT),
                 Property(name="author", data_type=DataType.TEXT)
             ],
-            vectorizer="mediumnew-t2v-transformers-1",
-            vectorizer_config={"host": "t2v-transformers", "port": 8080}
+            vectorizer_config=[
+                Configure.NamedVectors.text2vec_ollama(
+                    name="text",
+                    source_properties=["text"],
+                    api_endpoint="http://host.docker.internal:11434",  # If using Docker, use this to contact your local Ollama instance
+                    model="nomic-embed-text:latest",  # The model to use, e.g. "nomic-embed-text"
+                )
+            ],
         )
         print("[LOG] Коллекция 'Document' успешно создана.")
     except Exception as e:

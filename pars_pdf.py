@@ -2,8 +2,9 @@ import os
 from weaviate import WeaviateClient
 from weaviate.connect import ConnectionParams
 from weaviate.exceptions import WeaviateGRPCUnavailableError, WeaviateClosedClientError
-from weaviate.classes.config import Property, DataType
+from weaviate.classes.config import Property, DataType, Configure
 from pypdf import PdfReader
+import weaviate
 
 # Папка с PDF-файлами
 pdf_folder = "books"
@@ -60,24 +61,9 @@ def parse_filename_for_book_and_author(filename: str) -> tuple:
         book_author = ""
     return book_title, book_author
 
-# Устанавливаем параметры подключения: HTTP на localhost:8080, gRPC на localhost:8086
-connection_params = ConnectionParams(
-    http={
-        "host": "localhost",
-        "port": 8080,
-        "secure": False,
-        "timeout": 2000
-    },
-    grpc={
-        "host": "localhost",
-        "port": 8086,
-        "secure": False,
-        "timeout": 2000
-    }
-)
 
 # Инициализируем клиента Weaviate
-client = WeaviateClient(connection_params=connection_params)
+client = weaviate.connect_to_local()
 client._skip_init_checks = True  # Отключаем стартовые проверки (использовать с осторожностью)
 
 # Подключаем клиента. Если gRPC health check не проходит, выводим предупреждение и продолжаем работу.
@@ -98,7 +84,15 @@ try:
             Property(name="title__book", data_type=DataType.TEXT),
             Property(name="author", data_type=DataType.TEXT),
             Property(name="page_number", data_type=DataType.INT)
-        ]
+        ],
+        vectorizer_config=[
+                Configure.NamedVectors.text2vec_ollama(
+                    name="text",
+                    source_properties=["text"],
+                    api_endpoint="http://host.docker.internal:11434",  # If using Docker, use this to contact your local Ollama instance
+                    model="nomic-embed-text:latest",  # The model to use, e.g. "nomic-embed-text"
+                )
+            ]
     )
     print("Коллекция 'Document' успешно создана.")
 except Exception as e:
