@@ -1,7 +1,6 @@
 import os
 import uuid
 import re
-import sys
 import time
 from weaviate import WeaviateClient
 from weaviate.connect import ConnectionParams
@@ -75,7 +74,7 @@ def extract_pages_and_metadata(pdf_path: str):
 def clean_text(text: str) -> str:
     text = text.replace("-\n", "")
     text = text.replace("-\r\n", "")
-    text = text.replace("\r\n", " ").replace("\n", " ")
+    text = text.replace("\r\n", "").replace("\n", "")
     text = " ".join(text.split())
     return text
 
@@ -92,22 +91,53 @@ def split_text(text: str, max_length: int = 1000) -> list:
         chunks.append(text)
     return chunks
 
-def split_text_semantic(text: str, threshold: float = 0.75) -> list:
+def is_noise_sentence(sent: str) -> bool:
+    if len(sent.strip()) < 30:
+        return True
+    if len(sent.split()) < 3:
+        return True
+    if re.search(r"\.{3,}", sent):  # много точек подряд
+        return True
+    return False
+
+def split_text_semantic(text: str, threshold: float = 0.35) -> list:
     sentences = re.split(r'(?<=[.!?])\s+', text)
     if not sentences:
         return [text]
-    embeddings = MODEL.encode(sentences)
+
+    # Отфильтровываем откровенный мусор
+    filtered_sentences = [s for s in sentences if not is_noise_sentence(s)]
+    if not filtered_sentences:
+        return []
+
+    embeddings = MODEL.encode(filtered_sentences)
     chunks = []
-    current_chunk = [sentences[0]]
-    for i in range(1, len(sentences)):
+    current_chunk = [filtered_sentences[0]]
+
+    for i in range(1, len(filtered_sentences)):
+        prev = filtered_sentences[i-1]
+        curr = filtered_sentences[i]
+
         sim = util.cos_sim(embeddings[i-1], embeddings[i])
+
+        # Если текущее короткое — добавим его потом
+        if 30 <= len(curr.strip()) <= 80 and len(curr.split()) <= 10:
+            # но только если следующий чанк будет «нормальным»
+            if i + 1 < len(filtered_sentences):
+                next_sent = filtered_sentences[i + 1]
+                if not is_noise_sentence(next_sent):
+                    current_chunk.append(curr)
+                    continue
+
         if sim < threshold:
             chunks.append(" ".join(current_chunk))
-            current_chunk = [sentences[i]]
+            current_chunk = [curr]
         else:
-            current_chunk.append(sentences[i])
+            current_chunk.append(curr)
+
     if current_chunk:
         chunks.append(" ".join(current_chunk))
+
     return chunks
 
 def main():
