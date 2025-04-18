@@ -95,7 +95,7 @@ def search_by_keyword(query_text: str, limit: int = 6) -> list:
         return []
 
 
-def search_hybrid(query_text: str, alpha: float = 0.9):
+def search_hybrid(query_text: str, alpha: float = 0.7):
     client = get_client()
     try:
         collection = client.collections.get(CLASS_NAME)
